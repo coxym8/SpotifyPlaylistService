@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Linq;
 using System.Threading.Tasks;
+using SpotifyPlaylistService.Models;
 using SpotifyPlaylistService.Services;
+using SpotifyPlaylistService.Storage;
 
 namespace SpotifyGenrePlaylistManager
 {
@@ -12,40 +14,43 @@ namespace SpotifyGenrePlaylistManager
             Console.WriteLine("=== Spotify Genre Playlist Manager ===\n");
 
             // Initialize services
-            var authService = new SpotifyAuthService();
+            var authService = new SpotifyAuthService(new JsonSessionStore());
             var apiService = new SpotifyApiService();
-            var managerService = new SpotifyManagerService(apiService);
+            var managerService = new SpotifyManagerService(apiService, new JsonArtistGenreCache());
+            authService.AuthorizationUrlReady += url =>
+                Console.WriteLine($"\nIf your browser does not open, visit:\n{url}\n");
 
-            // Authenticate
-            Console.Write("Enter your Spotify Client ID: ");
-            string? clientId = Console.ReadLine();
-
-            Console.Write("Enter your Spotify Client Secret: ");
-            string? clientSecret = Console.ReadLine();
-
-            if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(clientSecret))
+            if (await authService.TryRestoreSessionAsync())
             {
-                Console.WriteLine("Client ID and Secret are required.");
-                return;
+                Console.WriteLine("Restored saved Spotify session.");
             }
-
-            Console.WriteLine("\nAuthenticating...");
-            if (!await authService.AuthenticateAsync(clientId, clientSecret))
+            else
             {
-                Console.WriteLine("Authentication failed.");
-                return;
-            }
+                var clientId = Environment.GetEnvironmentVariable("SPOTIFY_CLIENT_ID");
+                if (string.IsNullOrWhiteSpace(clientId))
+                {
+                    Console.Write("Enter your Spotify Client ID: ");
+                    clientId = Console.ReadLine();
+                }
 
-            Console.WriteLine("Authentication successful!");
+                if (string.IsNullOrWhiteSpace(clientId))
+                {
+                    Console.WriteLine("Client ID is required.");
+                    return;
+                }
 
-            if (authService.AccessToken == null)
-            {
-                Console.WriteLine("Failed to obtain access token.");
-                return;
+                Console.WriteLine("\nAuthenticating...");
+                if (!await authService.AuthenticateWithPkceAsync(clientId.Trim()))
+                {
+                    Console.WriteLine("Authentication failed.");
+                    return;
+                }
+
+                Console.WriteLine("Authentication successful!");
             }
 
             // Initialize manager
-            await managerService.InitializeAsync(authService.AccessToken);
+            await managerService.InitializeAsync(authService);
 
             while (true)
             {
@@ -58,7 +63,8 @@ namespace SpotifyGenrePlaylistManager
                 Console.WriteLine("6. View genre playlists");
                 Console.WriteLine("7. Delete specific genre playlist");
                 Console.WriteLine("8. Delete ALL genre playlists");
-                Console.WriteLine("9. Exit");
+                Console.WriteLine("9. Create/update COLLATED genre playlists (Pop, Rock, ...)");
+                Console.WriteLine("0. Exit");
                 Console.Write("\nSelect option: ");
 
                 string? choice = Console.ReadLine();
@@ -106,6 +112,10 @@ namespace SpotifyGenrePlaylistManager
                             break;
 
                         case "9":
+                            await CreateCollatedPlaylistsAsync(managerService);
+                            break;
+
+                        case "0":
                             Console.WriteLine("\nGoodbye!");
                             return;
 
@@ -225,6 +235,31 @@ namespace SpotifyGenrePlaylistManager
             Console.WriteLine($"\nSuccessfully created/updated {results.Count} playlists!");
         }
 
+        static async Task CreateCollatedPlaylistsAsync(ISpotifyManagerService manager)
+        {
+            var ruleStore = new GenreRuleStore();
+            var rules = ruleStore.Load();
+
+            Console.WriteLine("\nFetching liked songs and genres...");
+            var tracks = await manager.GetLikedSongsWithGenresAsync();
+            var groups = manager.CollateGenres(tracks, rules);
+
+            Console.WriteLine($"\n=== Collated Genres (rules: {ruleStore.FilePath}) ===");
+            foreach (var group in groups)
+            {
+                Console.WriteLine($"  {group.Name}: {group.Tracks.Count} tracks from {group.SourceGenres.Count} genres");
+            }
+
+            Console.Write($"\nCreate/update {groups.Count} playlists? (y/n): ");
+            if (Console.ReadLine()?.ToLower() != "y")
+                return;
+
+            var progress = new Progress<OperationProgress>(p => Console.WriteLine($"  {p.Message}"));
+            var results = await manager.CreateCollatedPlaylistsAsync(groups, progress);
+
+            Console.WriteLine($"\nSuccessfully created/updated {results.Count} playlists!");
+        }
+
         static async Task ViewPlaylistsAsync(ISpotifyManagerService manager)
         {
             Console.WriteLine("\nFetching playlists...");
@@ -269,7 +304,7 @@ namespace SpotifyGenrePlaylistManager
             Console.WriteLine("\n=== Genre Playlists ===");
             for (int i = 0; i < genrePlaylists.Count; i++)
             {
-                var genreName = genrePlaylists[i].Name.Replace("[Genre] ", "");
+                var genreName = GenrePlaylistNaming.GenreFromName(genrePlaylists[i].Name);
                 Console.WriteLine($"{i + 1}. {genreName} ({genrePlaylists[i].TotalTracks} tracks)");
             }
 
@@ -287,7 +322,7 @@ namespace SpotifyGenrePlaylistManager
             // Check if input is a number
             if (int.TryParse(input, out int index) && index > 0 && index <= genrePlaylists.Count)
             {
-                genreToDelete = genrePlaylists[index - 1].Name.Replace("[Genre] ", "");
+                genreToDelete = GenrePlaylistNaming.GenreFromName(genrePlaylists[index - 1].Name);
             }
             else
             {

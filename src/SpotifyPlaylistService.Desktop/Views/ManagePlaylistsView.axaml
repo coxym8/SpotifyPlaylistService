@@ -1,0 +1,51 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SpotifyPlaylistService.Desktop.ViewModels"
+             x:Class="SpotifyPlaylistService.Desktop.Views.ManagePlaylistsView"
+             x:DataType="vm:ManagePlaylistsViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Top" Spacing="12" Margin="0,0,0,12">
+      <TextBlock Classes="h1" Text="Manage created playlists" />
+      <TextBlock Classes="muted"
+                 Text="Only playlists you own whose names start with [Genre] are listed, so your other playlists can't be deleted here. Spotify deletes by unfollowing; you can restore playlists at spotify.com/account/recover-playlists." />
+      <WrapPanel>
+        <Button Content="Refresh" Command="{Binding RefreshCommand}" Margin="0,0,6,6" />
+        <Button Content="Select all shown" Command="{Binding SelectAllCommand}" Margin="0,0,6,6" />
+        <Button Content="Select none" Command="{Binding SelectNoneCommand}" Margin="0,0,18,6" />
+        <TextBox Watermark="Filter by name" Text="{Binding FilterText}" Width="240" Margin="0,0,6,6" />
+      </WrapPanel>
+      <TextBlock Classes="muted" Text="{Binding SummaryText}" />
+    </StackPanel>
+
+    <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,12,0,0">
+      <ProgressBar Value="{Binding ProgressValue}" Maximum="{Binding ProgressMaximum}"
+                   IsVisible="{Binding DeleteSelectedCommand.IsRunning}" />
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Button Classes="accent" Command="{Binding DeleteSelectedCommand}">
+          <TextBlock Text="{Binding SelectedCount, StringFormat='Delete {0} selected'}" />
+        </Button>
+        <Button Content="Cancel" Command="{Binding DeleteSelectedCancelCommand}"
+                IsVisible="{Binding DeleteSelectedCommand.IsRunning}" />
+      </StackPanel>
+      <SelectableTextBlock Text="{Binding LastResult}" TextWrapping="Wrap"
+                           IsVisible="{Binding LastResult, Converter={x:Static ObjectConverters.IsNotNull}}" />
+    </StackPanel>
+
+    <DataGrid ItemsSource="{Binding Playlists}" AutoGenerateColumns="False" GridLinesVisibility="Horizontal"
+              CanUserSortColumns="True">
+      <DataGrid.Columns>
+        <DataGridTemplateColumn Header="" Width="56">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate x:DataType="vm:PlaylistItem">
+              <CheckBox IsChecked="{Binding IsSelected}" HorizontalAlignment="Center" />
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+        <DataGridTextColumn x:DataType="vm:PlaylistItem" Header="Playlist" Binding="{Binding Name}" Width="*"
+                            IsReadOnly="True" />
+        <DataGridTextColumn x:DataType="vm:PlaylistItem" Header="Songs" Binding="{Binding TrackCount}" Width="100"
+                            IsReadOnly="True" />
+      </DataGrid.Columns>
+    </DataGrid>
+  </DockPanel>
+</UserControl>

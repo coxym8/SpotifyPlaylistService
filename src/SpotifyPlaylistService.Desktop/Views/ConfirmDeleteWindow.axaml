@@ -1,0 +1,26 @@
+<Window xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SpotifyPlaylistService.Desktop.ViewModels"
+        x:Class="SpotifyPlaylistService.Desktop.Views.ConfirmDeleteWindow"
+        x:DataType="vm:ConfirmDeleteViewModel"
+        Title="Confirm delete" Width="460" SizeToContent="Height" CanResize="False"
+        WindowStartupLocation="CenterOwner">
+  <StackPanel Margin="24" Spacing="12">
+    <TextBlock Classes="h2" Text="{Binding Title}" />
+    <Border Classes="card" MaxHeight="240" Padding="8">
+      <ScrollViewer>
+        <ItemsControl ItemsSource="{Binding PlaylistNames}" />
+      </ScrollViewer>
+    </Border>
+    <TextBlock Classes="muted" FontSize="12"
+               Text="Spotify removes them from your library. They can be restored from spotify.com/account/recover-playlists." />
+    <StackPanel Spacing="6" IsVisible="{Binding RequiresTypedConfirmation}">
+      <TextBlock Text="{Binding ConfirmationPrompt}" />
+      <TextBox Name="ConfirmationBox" Text="{Binding ConfirmationText}" />
+    </StackPanel>
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button Content="Cancel" Click="OnCancel" IsCancel="True" />
+      <Button Classes="accent" Content="Delete" Click="OnConfirm" IsEnabled="{Binding CanConfirm}" />
+    </StackPanel>
+  </StackPanel>
+</Window>

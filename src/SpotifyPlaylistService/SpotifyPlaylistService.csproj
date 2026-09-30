@@ -10,4 +10,8 @@
 	  <Authors>Isaac Cox</Authors>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="SpotifyPlaylistService.Tests" />
+  </ItemGroup>
+
 </Project>
