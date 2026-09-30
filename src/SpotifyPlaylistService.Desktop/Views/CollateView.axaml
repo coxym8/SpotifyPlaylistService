@@ -1,0 +1,114 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SpotifyPlaylistService.Desktop.ViewModels"
+             x:Class="SpotifyPlaylistService.Desktop.Views.CollateView"
+             x:DataType="vm:CollateViewModel">
+  <Grid ColumnDefinitions="360,24,*" RowDefinitions="Auto,*">
+    <TextBlock Grid.ColumnSpan="3" Classes="h1" Text="Collate genres into playlists" Margin="0,0,0,12" />
+
+    <!-- Rules editor -->
+    <DockPanel Grid.Row="1" Grid.Column="0">
+      <StackPanel DockPanel.Dock="Top" Spacing="8" Margin="0,0,0,8">
+        <TextBlock Classes="h2" Text="Rules" />
+        <TextBlock Classes="muted" FontSize="12"
+                   Text="Rules run top to bottom; a Spotify genre joins the first group whose keyword starts a word in it. Exact names win over keywords." />
+        <StackPanel Orientation="Horizontal" Spacing="6">
+          <Button Content="Add" Command="{Binding AddRuleCommand}" />
+          <Button Content="Remove" Command="{Binding RemoveRuleCommand}" />
+          <Button Content="Up" Command="{Binding MoveRuleUpCommand}" />
+          <Button Content="Down" Command="{Binding MoveRuleDownCommand}" />
+        </StackPanel>
+      </StackPanel>
+
+      <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,8,0,0">
+        <Border Classes="card" IsVisible="{Binding SelectedRule, Converter={x:Static ObjectConverters.IsNotNull}}">
+          <StackPanel Spacing="6">
+            <TextBlock Text="Group name" FontSize="12" />
+            <TextBox Text="{Binding SelectedRule.Group, FallbackValue=''}" />
+            <TextBlock Text="Keywords (comma separated)" FontSize="12" />
+            <TextBox Text="{Binding SelectedRule.KeywordsText, FallbackValue=''}" AcceptsReturn="True"
+                     TextWrapping="Wrap" Height="64" />
+            <TextBlock Text="Exact genre names (comma separated)" FontSize="12" />
+            <TextBox Text="{Binding SelectedRule.ExactText, FallbackValue=''}" AcceptsReturn="True"
+                     TextWrapping="Wrap" Height="48" />
+          </StackPanel>
+        </Border>
+        <StackPanel Orientation="Horizontal" Spacing="6">
+          <Button Content="Preview" Command="{Binding ApplyRulesCommand}" />
+          <Button Classes="accent" Content="Save rules" Command="{Binding SaveRulesCommand}" />
+          <Button Content="Reset to defaults" Command="{Binding ResetRulesCommand}" />
+        </StackPanel>
+      </StackPanel>
+
+      <ListBox ItemsSource="{Binding Rules}" SelectedItem="{Binding SelectedRule}">
+        <ListBox.ItemTemplate>
+          <DataTemplate x:DataType="vm:RuleItem">
+            <StackPanel Spacing="2">
+              <TextBlock Text="{Binding Group}" FontWeight="SemiBold" />
+              <TextBlock Text="{Binding KeywordsText}" Classes="muted" FontSize="12" TextTrimming="CharacterEllipsis"
+                         TextWrapping="NoWrap" />
+            </StackPanel>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+    </DockPanel>
+
+    <!-- Preview -->
+    <DockPanel Grid.Row="1" Grid.Column="2">
+      <StackPanel DockPanel.Dock="Top" Spacing="8" Margin="0,0,0,8">
+        <TextBlock Classes="h2" Text="Playlists to create" />
+        <TextBlock Classes="muted" Text="{Binding SummaryText}" />
+        <WrapPanel>
+          <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,18,6">
+            <TextBlock Text="Min songs" VerticalAlignment="Center" />
+            <NumericUpDown Value="{Binding MinTracks}" Minimum="1" Maximum="1000"
+                           Increment="1" FormatString="0" Width="120" />
+          </StackPanel>
+          <CheckBox Content="Unmatched → 'Other'" IsChecked="{Binding IncludeOther}" Margin="0,0,18,6" />
+          <CheckBox Content="No genre → 'Unclassified'" IsChecked="{Binding IncludeUnclassified}" Margin="0,0,0,6" />
+        </WrapPanel>
+        <WrapPanel>
+          <Button Content="Select all" Command="{Binding SelectAllCommand}" Margin="0,0,6,6" />
+          <Button Content="Select none" Command="{Binding SelectNoneCommand}" Margin="0,0,18,6" />
+          <TextBox Watermark="Custom group name" Text="{Binding CustomGroupName}" Width="200" Margin="0,0,6,6" />
+          <Button Content="Merge selected" Command="{Binding MergeSelectedCommand}" Margin="0,0,6,6"
+                  ToolTip.Tip="Combine the checked groups into one custom group (adds a rule)" />
+        </WrapPanel>
+      </StackPanel>
+
+      <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,12,0,0">
+        <ProgressBar Value="{Binding ProgressValue}" Maximum="{Binding ProgressMaximum}"
+                     IsVisible="{Binding CreatePlaylistsCommand.IsRunning}" />
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Button Classes="accent" Command="{Binding CreatePlaylistsCommand}">
+            <TextBlock Text="{Binding SelectedCount, StringFormat='Create / update {0} playlists'}" />
+          </Button>
+          <Button Content="Cancel" Command="{Binding CreatePlaylistsCancelCommand}"
+                  IsVisible="{Binding CreatePlaylistsCommand.IsRunning}" />
+        </StackPanel>
+        <TextBlock Classes="muted" FontSize="12"
+                   Text="Playlists are private and named '[Genre] Group'. Existing ones are updated in place." />
+      </StackPanel>
+
+      <ScrollViewer>
+        <ItemsControl ItemsSource="{Binding Groups}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:GroupItem">
+              <Border Classes="card" Margin="0,0,0,6" Padding="12,8">
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                  <CheckBox IsChecked="{Binding IsSelected}" VerticalAlignment="Center" />
+                  <StackPanel Grid.Column="1" Spacing="2" Margin="4,0,12,0">
+                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Details}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <TextBlock Grid.Column="2" VerticalAlignment="Center"
+                             Text="{Binding TrackCount, StringFormat='{}{0} songs'}" />
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+    </DockPanel>
+  </Grid>
+</UserControl>

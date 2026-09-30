@@ -13,6 +13,14 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		README.md = README.md
 	EndProjectSection
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{92EA12AF-AEE2-4D32-9EA0-8F0FB5BDCA9A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SpotifyPlaylistService.Desktop", "src\SpotifyPlaylistService.Desktop\SpotifyPlaylistService.Desktop.csproj", "{E268558D-4EB7-449A-AFD6-2313C72546AA}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{9EF3119D-3CCE-44E2-BF4F-2AAF851A8245}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SpotifyPlaylistService.Tests", "tests\SpotifyPlaylistService.Tests\SpotifyPlaylistService.Tests.csproj", "{D8F29183-C66A-493F-A606-5A3DFED4ADF4}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -27,11 +35,23 @@ Global
 		{1A368CD9-FD22-1F44-AEFD-D2D94AD3163D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1A368CD9-FD22-1F44-AEFD-D2D94AD3163D}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{1A368CD9-FD22-1F44-AEFD-D2D94AD3163D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E268558D-4EB7-449A-AFD6-2313C72546AA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E268558D-4EB7-449A-AFD6-2313C72546AA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E268558D-4EB7-449A-AFD6-2313C72546AA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E268558D-4EB7-449A-AFD6-2313C72546AA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D8F29183-C66A-493F-A606-5A3DFED4ADF4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D8F29183-C66A-493F-A606-5A3DFED4ADF4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D8F29183-C66A-493F-A606-5A3DFED4ADF4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D8F29183-C66A-493F-A606-5A3DFED4ADF4}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {4BE881A1-2225-49C1-A2DD-528143486C6F}
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{E268558D-4EB7-449A-AFD6-2313C72546AA} = {92EA12AF-AEE2-4D32-9EA0-8F0FB5BDCA9A}
+		{D8F29183-C66A-493F-A606-5A3DFED4ADF4} = {9EF3119D-3CCE-44E2-BF4F-2AAF851A8245}
 	EndGlobalSection
 EndGlobal

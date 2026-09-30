@@ -1,0 +1,44 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SpotifyPlaylistService.Desktop.ViewModels"
+             x:Class="SpotifyPlaylistService.Desktop.Views.ConnectView"
+             x:DataType="vm:ConnectViewModel">
+  <ScrollViewer>
+    <StackPanel MaxWidth="620" HorizontalAlignment="Left" Spacing="16">
+      <TextBlock Classes="h1" Text="Connect to Spotify" />
+
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="h2" Text="One-time setup" />
+          <TextBlock Classes="muted"
+                     Text="1. Create an app at developer.spotify.com/dashboard and choose Web API.&#x0a;2. Add this redirect URI to the app:" />
+          <SelectableTextBlock Text="{Binding RedirectUri}" FontFamily="Consolas,Menlo,monospace" />
+          <TextBlock Classes="muted"
+                     Text="3. Paste the app's Client ID below. No client secret is needed; sign-in uses PKCE." />
+        </StackPanel>
+      </Border>
+
+      <StackPanel Spacing="10" IsVisible="{Binding !State.IsSignedIn}">
+        <TextBox Watermark="Client ID" Text="{Binding ClientId}" />
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Button Classes="accent" Content="Sign in with Spotify" Command="{Binding SignInCommand}" />
+          <Button Content="Cancel" Command="{Binding SignInCancelCommand}"
+                  IsVisible="{Binding SignInCommand.IsRunning}" />
+        </StackPanel>
+      </StackPanel>
+
+      <StackPanel Spacing="6" IsVisible="{Binding AuthorizationUrl, Converter={x:Static ObjectConverters.IsNotNull}}">
+        <TextBlock Classes="muted" Text="Waiting for approval in your browser. If no browser opened, open this link:" />
+        <SelectableTextBlock Text="{Binding AuthorizationUrl}" TextWrapping="Wrap" FontSize="12" />
+      </StackPanel>
+
+      <StackPanel Spacing="10" IsVisible="{Binding State.IsSignedIn}">
+        <TextBlock Text="{Binding State.SignedInText}" FontWeight="SemiBold" />
+        <Button Content="Sign out" Command="{Binding SignOutCommand}" />
+      </StackPanel>
+
+      <TextBlock Classes="muted" FontSize="12"
+                 Text="Spotify development-mode apps require the app owner to have Premium and allow up to 5 users." />
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

@@ -1,0 +1,46 @@
+<Window xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SpotifyPlaylistService.Desktop.ViewModels"
+        xmlns:views="using:SpotifyPlaylistService.Desktop.Views"
+        x:Class="SpotifyPlaylistService.Desktop.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="Spotify Playlist Manager"
+        Width="1180" Height="760" MinWidth="820" MinHeight="520"
+        WindowStartupLocation="CenterScreen">
+  <Window.DataTemplates>
+    <DataTemplate DataType="vm:ConnectViewModel"><views:ConnectView /></DataTemplate>
+    <DataTemplate DataType="vm:LibraryViewModel"><views:LibraryView /></DataTemplate>
+    <DataTemplate DataType="vm:CollateViewModel"><views:CollateView /></DataTemplate>
+    <DataTemplate DataType="vm:ManagePlaylistsViewModel"><views:ManagePlaylistsView /></DataTemplate>
+  </Window.DataTemplates>
+
+  <DockPanel>
+    <Border DockPanel.Dock="Bottom" Padding="16,8"
+            Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
+      <TextBlock Text="{Binding State.StatusMessage}" TextTrimming="CharacterEllipsis" />
+    </Border>
+
+    <Border DockPanel.Dock="Left" Width="220"
+            Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Margin="20,24,20,20" Spacing="4">
+          <TextBlock Text="Playlist Manager" FontSize="18" FontWeight="SemiBold" />
+          <TextBlock Classes="muted" FontSize="12" Text="{Binding State.SignedInText}" />
+        </StackPanel>
+        <ListBox ItemsSource="{Binding Pages}" SelectedItem="{Binding SelectedPage}"
+                 Background="Transparent" Margin="8,0">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:PageItem">
+              <StackPanel Margin="4,6" Spacing="2">
+                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding Subtitle}" Classes="muted" FontSize="12" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </Border>
+
+    <ContentControl Content="{Binding SelectedPage.ViewModel}" Margin="28,24" />
+  </DockPanel>
+</Window>

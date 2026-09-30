@@ -1,0 +1,30 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SpotifyPlaylistService.Desktop.ViewModels"
+             x:Class="SpotifyPlaylistService.Desktop.Views.LibraryView"
+             x:DataType="vm:LibraryViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Top" Spacing="12" Margin="0,0,0,12">
+      <TextBlock Classes="h1" Text="Your library" />
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Button Classes="accent" Content="Load liked songs" Command="{Binding LoadCommand}" />
+        <Button Content="Cancel" Command="{Binding LoadCancelCommand}" IsVisible="{Binding LoadCommand.IsRunning}" />
+        <TextBlock VerticalAlignment="Center" Classes="muted" Text="{Binding SummaryText}" />
+      </StackPanel>
+      <StackPanel Spacing="4" IsVisible="{Binding LoadCommand.IsRunning}">
+        <ProgressBar Value="{Binding ProgressValue}" Maximum="{Binding ProgressMaximum}" />
+        <TextBlock Classes="muted" FontSize="12" Text="{Binding ProgressText}" />
+      </StackPanel>
+      <TextBox Watermark="Filter by genre or group" Text="{Binding FilterText}" />
+    </StackPanel>
+
+    <DataGrid ItemsSource="{Binding Genres}" IsReadOnly="True" AutoGenerateColumns="False"
+              CanUserSortColumns="True" GridLinesVisibility="Horizontal">
+      <DataGrid.Columns>
+        <DataGridTextColumn x:DataType="vm:GenreRow" Header="Spotify genre" Binding="{Binding Genre}" Width="*" />
+        <DataGridTextColumn x:DataType="vm:GenreRow" Header="Collated into" Binding="{Binding Group}" Width="220" />
+        <DataGridTextColumn x:DataType="vm:GenreRow" Header="Songs" Binding="{Binding Tracks}" Width="100" />
+      </DataGrid.Columns>
+    </DataGrid>
+  </DockPanel>
+</UserControl>

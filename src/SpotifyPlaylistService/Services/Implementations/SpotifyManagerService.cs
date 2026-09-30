@@ -1,4 +1,6 @@
 ﻿using SpotifyPlaylistService.Models;
+using SpotifyPlaylistService.Services.Collation;
+using SpotifyPlaylistService.Storage;
 
 namespace SpotifyPlaylistService.Services
 {
@@ -7,11 +9,15 @@ namespace SpotifyPlaylistService.Services
     /// </summary>
     public class SpotifyManagerService : ISpotifyManagerService
     {
-        private readonly ISpotifyApiService _apiService;
+        private const int ArtistLookupConcurrency = 4;
 
-        public SpotifyManagerService(ISpotifyApiService apiService)
+        private readonly ISpotifyApiService _apiService;
+        private readonly IArtistGenreCache? _genreCache;
+
+        public SpotifyManagerService(ISpotifyApiService apiService, IArtistGenreCache? genreCache = null)
         {
             _apiService = apiService;
+            _genreCache = genreCache;
         }
 
         public async Task InitializeAsync(string accessToken)
@@ -20,51 +26,104 @@ namespace SpotifyPlaylistService.Services
             await _apiService.GetUserIdAsync();
         }
 
-        public async Task<List<SpotifyTrack>> GetLikedSongsWithGenresAsync()
+        public async Task InitializeAsync(ISpotifyAuthService authService, CancellationToken ct = default)
         {
-            var tracks = await _apiService.GetLikedSongsAsync();
+            if (authService.AccessToken == null)
+                throw new InvalidOperationException("Sign in before initializing the manager.");
 
-            var uniqueArtists = tracks.GroupBy(t => t.ArtistId)
-                                     .Select(g => g.First())
-                                     .ToList();
+            _apiService.SetAccessToken(authService.AccessToken);
+            _apiService.SetTokenRefresher(async refreshCt =>
+                await authService.RefreshAccessTokenAsync(refreshCt) ? authService.AccessToken : null);
 
+            await _apiService.GetUserIdAsync(ct);
+        }
+
+        public Task<string> GetCurrentUserIdAsync(CancellationToken ct = default) => _apiService.GetUserIdAsync(ct);
+
+        public async Task<List<SpotifyTrack>> GetLikedSongsWithGenresAsync(IProgress<OperationProgress>? progress = null,
+            CancellationToken ct = default)
+        {
+            var tracks = await _apiService.GetLikedSongsAsync(progress, ct);
+
+            var artistIds = tracks.Select(t => t.ArtistId).Distinct().ToList();
             var artistGenres = new Dictionary<string, List<string>>();
+            var toFetch = new List<string>();
 
-            foreach (var track in uniqueArtists)
+            foreach (var artistId in artistIds)
             {
-                var genres = await _apiService.GetArtistGenresAsync(track.ArtistId);
-                artistGenres[track.ArtistId] = genres;
+                if (_genreCache != null && _genreCache.TryGet(artistId, out var cached))
+                    artistGenres[artistId] = cached;
+                else
+                    toFetch.Add(artistId);
+            }
+
+            // Spotify removed the batch artists endpoint, so look artists up individually
+            // with bounded concurrency; the HTTP handler backs off on 429
+            int completed = 0;
+            using var gate = new SemaphoreSlim(ArtistLookupConcurrency);
+            using var failFast = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var lookups = toFetch.Select(async artistId =>
+            {
+                await gate.WaitAsync(failFast.Token);
+                try
+                {
+                    var genres = await _apiService.GetArtistGenresAsync(artistId, failFast.Token);
+                    _genreCache?.Set(artistId, genres);
+
+                    lock (artistGenres)
+                        artistGenres[artistId] = genres;
+
+                    var done = Interlocked.Increment(ref completed);
+                    progress?.Report(new OperationProgress(done, toFetch.Count,
+                        $"Looked up genres for {done} of {toFetch.Count} artists"));
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // Stop queued lookups; the first error is what the caller sees
+                    failFast.Cancel();
+                    throw;
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            }).ToList();
+
+            try
+            {
+                await Task.WhenAll(lookups);
+            }
+            finally
+            {
+                // Keep whatever was fetched, even if cancelled part-way
+                _genreCache?.Save();
             }
 
             foreach (var track in tracks)
             {
-                if (artistGenres.ContainsKey(track.ArtistId))
-                {
-                    track.Genres = artistGenres[track.ArtistId];
-                }
+                if (artistGenres.TryGetValue(track.ArtistId, out var genres))
+                    track.Genres = genres;
             }
 
             return tracks;
         }
 
-        public async Task<List<SpotifyPlaylist>> GetUserPlaylistsAsync()
-        {
-            return await _apiService.GetUserPlaylistsAsync();
-        }
+        public Task<List<SpotifyPlaylist>> GetUserPlaylistsAsync(CancellationToken ct = default) =>
+            _apiService.GetUserPlaylistsAsync(ct);
 
-        public async Task<bool> AddPlaylistTracksToLikedAsync(string playlistId)
+        public async Task<bool> AddPlaylistTracksToLikedAsync(string playlistId, CancellationToken ct = default)
         {
-            var tracks = await _apiService.GetPlaylistTracksAsync(playlistId);
+            var tracks = await _apiService.GetPlaylistTracksAsync(playlistId, ct);
             var trackIds = tracks.Select(t => t.Id).ToList();
 
-            return await _apiService.AddTracksToLikedAsync(trackIds);
+            return await _apiService.AddTracksToLikedAsync(trackIds, ct);
         }
 
-        public async Task<bool> AddMultiplePlaylistsToLikedAsync(List<string> playlistIds)
+        public async Task<bool> AddMultiplePlaylistsToLikedAsync(List<string> playlistIds, CancellationToken ct = default)
         {
             foreach (var playlistId in playlistIds)
             {
-                var success = await AddPlaylistTracksToLikedAsync(playlistId);
+                var success = await AddPlaylistTracksToLikedAsync(playlistId, ct);
                 if (!success)
                     return false;
             }
@@ -74,107 +133,171 @@ namespace SpotifyPlaylistService.Services
 
         public Dictionary<string, int> GetGenreStatistics(List<SpotifyTrack> tracks)
         {
-            var genreCounts = new Dictionary<string, int>();
-
-            foreach (var track in tracks)
-            {
-                foreach (var genre in track.Genres)
-                {
-                    if (genreCounts.ContainsKey(genre))
-                        genreCounts[genre]++;
-                    else
-                        genreCounts[genre] = 1;
-                }
-            }
-
-            return genreCounts.OrderByDescending(x => x.Value)
-                             .ToDictionary(x => x.Key, x => x.Value);
+            return tracks.SelectMany(t => t.Genres)
+                         .GroupBy(g => g)
+                         .OrderByDescending(g => g.Count())
+                         .ToDictionary(g => g.Key, g => g.Count());
         }
 
-        public async Task<string?> CreateOrUpdateGenrePlaylistAsync(string genre,
-            List<SpotifyTrack> allTracks)
+        public List<GenreGroup> CollateGenres(List<SpotifyTrack> tracks, GenreRuleSet rules) =>
+            new GenreCollator(rules).Collate(tracks);
+
+        public async Task<string?> CreateOrUpdateGenrePlaylistAsync(string genre, List<SpotifyTrack> allTracks,
+            CancellationToken ct = default)
         {
-            var playlistName = $"[Genre] {genre}";
             var genreTracks = allTracks.Where(t => t.Genres.Any(g =>
                 g.Equals(genre, StringComparison.OrdinalIgnoreCase))).ToList();
 
             if (genreTracks.Count == 0)
                 return null;
 
-            var existingPlaylist = await _apiService.FindPlaylistByNameAsync(playlistName);
-
-            string playlistId;
-
-            if (existingPlaylist != null)
-            {
-                await _apiService.ClearPlaylistAsync(existingPlaylist.Id);
-                playlistId = existingPlaylist.Id;
-            }
-            else
-            {
-                var description = $"Auto-generated genre playlist for {genre} ({genreTracks.Count} tracks). " +
-                                $"Organize under 'Genre' folder in your Spotify client.";
-                playlistId = await _apiService.CreatePlaylistAsync(playlistName, description);
-            }
-
-            var trackIds = genreTracks.Select(t => t.Id).ToList();
-            await _apiService.AddTracksToPlaylistAsync(playlistId, trackIds);
-
-            return playlistId;
+            var existing = await GetExistingGenrePlaylistsByNameAsync(ct);
+            return await SyncPlaylistAsync(genre, genreTracks, null, existing, ct);
         }
 
-        public async Task<Dictionary<string, string>> CreateAllGenrePlaylistsAsync(
-            List<SpotifyTrack> allTracks)
+        public async Task<Dictionary<string, string>> CreateAllGenrePlaylistsAsync(List<SpotifyTrack> allTracks,
+            IProgress<OperationProgress>? progress = null, CancellationToken ct = default)
         {
-            var genreStats = GetGenreStatistics(allTracks);
+            var groups = GetGenreStatistics(allTracks).Keys.Select(genre =>
+            {
+                var group = new GenreGroup { Name = genre };
+                group.SourceGenres.Add(genre);
+                group.Tracks.AddRange(allTracks.Where(t => t.Genres.Contains(genre)));
+                return group;
+            });
+
+            return await CreateCollatedPlaylistsAsync(groups, progress, ct);
+        }
+
+        public async Task<Dictionary<string, string>> CreateCollatedPlaylistsAsync(IEnumerable<GenreGroup> groups,
+            IProgress<OperationProgress>? progress = null, CancellationToken ct = default)
+        {
+            var groupList = groups.Where(g => g.Tracks.Count > 0).ToList();
+            var existing = await GetExistingGenrePlaylistsByNameAsync(ct);
             var result = new Dictionary<string, string>();
 
-            foreach (var genre in genreStats.Keys)
+            for (int i = 0; i < groupList.Count; i++)
             {
-                var playlistId = await CreateOrUpdateGenrePlaylistAsync(genre, allTracks);
-                if (!string.IsNullOrEmpty(playlistId))
-                {
-                    result[genre] = playlistId;
-                }
+                ct.ThrowIfCancellationRequested();
+                var group = groupList[i];
+                progress?.Report(new OperationProgress(i, groupList.Count, $"Syncing {group.Name}"));
+
+                var playlistId = await SyncPlaylistAsync(group.Name, group.Tracks, group.SourceGenres, existing, ct);
+                if (playlistId != null)
+                    result[group.Name] = playlistId;
             }
 
+            progress?.Report(new OperationProgress(groupList.Count, groupList.Count,
+                $"Created or updated {result.Count} playlists"));
             return result;
         }
 
-        public async Task<List<SpotifyPlaylist>> GetGenrePlaylistsAsync()
+        public async Task<List<SpotifyPlaylist>> GetGenrePlaylistsAsync(CancellationToken ct = default)
         {
-            var allPlaylists = await _apiService.GetUserPlaylistsAsync();
-            return allPlaylists.Where(p => p.Name.StartsWith("[Genre]")).ToList();
+            var userId = await _apiService.GetUserIdAsync(ct);
+            var allPlaylists = await _apiService.GetUserPlaylistsAsync(ct);
+
+            return allPlaylists.Where(p => IsCreatedByLibrary(p, userId)).ToList();
         }
 
-        public async Task<int> DeleteAllGenrePlaylistsAsync()
+        public async Task<BulkDeleteResult> DeleteGenrePlaylistsAsync(IEnumerable<SpotifyPlaylist> playlists,
+            IProgress<OperationProgress>? progress = null, CancellationToken ct = default)
         {
-            var genrePlaylists = await GetGenrePlaylistsAsync();
-            int deletedCount = 0;
+            var userId = await _apiService.GetUserIdAsync(ct);
+            var toDelete = playlists.DistinctBy(p => p.Id).ToList();
+            var result = new BulkDeleteResult();
 
-            foreach (var playlist in genrePlaylists)
+            for (int i = 0; i < toDelete.Count; i++)
             {
-                var success = await _apiService.DeletePlaylistAsync(playlist.Id);
-                if (success)
+                ct.ThrowIfCancellationRequested();
+                var playlist = toDelete[i];
+                progress?.Report(new OperationProgress(i, toDelete.Count, $"Deleting {playlist.Name}"));
+
+                if (!IsCreatedByLibrary(playlist, userId))
                 {
-                    deletedCount++;
+                    result.Failed.Add((playlist, "Not created by this app; skipped"));
+                    continue;
                 }
 
-                await Task.Delay(100);
+                try
+                {
+                    if (await _apiService.DeletePlaylistAsync(playlist.Id, ct))
+                        result.Deleted.Add(playlist);
+                    else
+                        result.Failed.Add((playlist, "Playlist not found"));
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    result.Failed.Add((playlist, ex.Message));
+                }
             }
 
-            return deletedCount;
+            progress?.Report(new OperationProgress(toDelete.Count, toDelete.Count,
+                $"Deleted {result.Deleted.Count} of {toDelete.Count} playlists"));
+            return result;
         }
 
-        public async Task<bool> DeleteGenrePlaylistAsync(string genre)
+        public async Task<int> DeleteAllGenrePlaylistsAsync(IProgress<OperationProgress>? progress = null,
+            CancellationToken ct = default)
         {
-            var playlistName = $"[Genre] {genre}";
-            var playlist = await _apiService.FindPlaylistByNameAsync(playlistName);
+            var genrePlaylists = await GetGenrePlaylistsAsync(ct);
+            var result = await DeleteGenrePlaylistsAsync(genrePlaylists, progress, ct);
+            return result.Deleted.Count;
+        }
+
+        public async Task<bool> DeleteGenrePlaylistAsync(string genre, CancellationToken ct = default)
+        {
+            var playlistName = GenrePlaylistNaming.PlaylistName(genre);
+            var playlist = (await GetGenrePlaylistsAsync(ct)).FirstOrDefault(p =>
+                p.Name.Equals(playlistName, StringComparison.OrdinalIgnoreCase));
 
             if (playlist == null)
                 return false;
 
-            return await _apiService.DeletePlaylistAsync(playlist.Id);
+            var result = await DeleteGenrePlaylistsAsync(new[] { playlist }, null, ct);
+            return result.Deleted.Count == 1;
+        }
+
+        private static bool IsCreatedByLibrary(SpotifyPlaylist playlist, string userId) =>
+            playlist.OwnerId == userId && GenrePlaylistNaming.IsGenrePlaylistName(playlist.Name);
+
+        /// <summary>
+        /// Fetches the user's genre playlists once so a bulk sync does not re-list every playlist per genre
+        /// </summary>
+        private async Task<Dictionary<string, SpotifyPlaylist>> GetExistingGenrePlaylistsByNameAsync(CancellationToken ct)
+        {
+            var existing = new Dictionary<string, SpotifyPlaylist>(StringComparer.OrdinalIgnoreCase);
+            foreach (var playlist in await GetGenrePlaylistsAsync(ct))
+                existing.TryAdd(playlist.Name, playlist);
+            return existing;
+        }
+
+        private async Task<string?> SyncPlaylistAsync(string genre, List<SpotifyTrack> tracks,
+            IEnumerable<string>? sourceGenres, Dictionary<string, SpotifyPlaylist> existing, CancellationToken ct)
+        {
+            var playlistName = GenrePlaylistNaming.PlaylistName(genre);
+            var trackIds = tracks.Select(t => t.Id).Distinct().ToList();
+
+            string playlistId;
+            if (existing.TryGetValue(playlistName, out var playlist))
+            {
+                playlistId = playlist.Id;
+            }
+            else
+            {
+                var description = GenrePlaylistNaming.Description(genre, trackIds.Count, sourceGenres);
+                playlistId = await _apiService.CreatePlaylistAsync(playlistName, description, ct);
+                existing[playlistName] = new SpotifyPlaylist
+                {
+                    Id = playlistId,
+                    Name = playlistName,
+                    OwnerId = await _apiService.GetUserIdAsync(ct),
+                    TotalTracks = trackIds.Count
+                };
+            }
+
+            var success = await _apiService.ReplacePlaylistTracksAsync(playlistId, trackIds, ct);
+            return success ? playlistId : null;
         }
     }
 }

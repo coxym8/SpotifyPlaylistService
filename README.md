@@ -1,213 +1,157 @@
 ﻿# SpotifyPlaylistService
 
-A C# library for managing Spotify playlists with genre-based organization, bulk operations, and liked songs management.
+A C# library and cross-platform desktop app (Linux and Windows) for organising your Spotify liked songs into genre playlists, collating Spotify's hundreds of micro-genres into a manageable set, and bulk-deleting the playlists it created.
+
+![Collate page](docs/screenshots/3-collate.png)
 
 ## Features
 
-- 🎵 **Genre-Based Playlist Management** - Automatically create playlists organized by music genres
+- 🖥️ **Desktop app (Avalonia)** - Native UI on Linux and Windows (macOS should work too, untested)
+- 🎛️ **Genre collation** - "bedroom pop", "k-pop" and "dance pop" become one **Pop** playlist, driven by editable rules
+- 🧩 **Custom groups** - Tick several groups and merge them into your own (e.g. "Heavy" = Metal + Punk)
+- 🗑️ **Safe bulk delete** - Multi-select delete that can only touch playlists you own that this app created
 - ❤️ **Liked Songs Integration** - Add tracks from playlists to your liked songs
-- 🔄 **Bulk Operations** - Create or delete multiple genre playlists at once
-- 📁 **Playlist Organization** - Genre playlists use `[Genre]` prefix for easy organization
-- 🔐 **OAuth 2.0 Authentication** - Secure authentication flow with token refresh support
+- 🔐 **PKCE sign-in** - Only a Client ID is needed, no client secret stored; the session is remembered between launches
+- ⚡ **Resilient API layer** - Automatic 429 back-off, token refresh on 401 and an on-disk artist-genre cache
 
-## Installation
+## Desktop app
 
-### NuGet Package (Coming Soon)
+### 1. Set up a Spotify app (once)
+1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) and create an app (choose **Web API**)
+2. Add the redirect URI `http://127.0.0.1:8888/callback`
+3. Copy the **Client ID** (the client secret is not needed)
+
+> Since February 2026, Spotify development-mode apps require the app owner to have **Spotify Premium** and allow up to **5 users** (added under *User Management* in the dashboard).
+
+### 2. Run it
+Requires the [.NET 8 SDK](https://dotnet.microsoft.com/download).
+
 ```bash
-dotnet add package SpotifyPlaylistService
+dotnet run --project src/SpotifyPlaylistService.Desktop
 ```
 
-### From Source
+Or build a standalone executable (no .NET install needed on the target machine):
+
 ```bash
-git clone https://github.com/yourusername/SpotifyPlaylistService.git
-cd SpotifyPlaylistService
-dotnet build
+# Windows
+dotnet publish src/SpotifyPlaylistService.Desktop -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+# Linux
+dotnet publish src/SpotifyPlaylistService.Desktop -c Release -r linux-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
 ```
 
-## Quick Start
+The executable is `SpotifyPlaylistManager(.exe)` under `src/SpotifyPlaylistService.Desktop/bin/Release/net8.0/<rid>/publish/`.
 
-### 1. Setup Spotify App
-1. Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
-2. Create a new app
-3. Add redirect URI: `http://127.0.0.1:8888/callback`
-4. Copy your **Client ID** and **Client Secret**
+### 3. Use it
 
-### 2. Basic Usage
+| Page | What it does |
+|------|--------------|
+| **Connect** | Paste your Client ID and sign in through the browser. Set `SPOTIFY_CLIENT_ID` to prefill it. |
+| **Library** | Loads liked songs and each artist's genres, and shows which group every Spotify genre collates into. |
+| **Collate** | Edit the rules, preview the resulting playlists, merge groups, and create/update the ticked ones. |
+| **Manage** | Lists playlists created by this app. Filter, multi-select and delete them in one go. |
+
+<p>
+  <img src="docs/screenshots/2-library.png" width="49%" alt="Library page">
+  <img src="docs/screenshots/4-manage.png" width="49%" alt="Manage page">
+</p>
+
+### How genre collation works
+
+Spotify tags artists (not tracks) with very specific genres. Rules map them to parent groups:
+
+- Rules are checked **top to bottom**; a genre joins the **first** group with a matching keyword, so specific groups (Metal) sit above generic ones (Rock).
+- A **keyword** matches when a word in the genre starts with it: `metal` matches `nu metal` and `metalcore`, while `rap` does not match `scrap`.
+- **Exact** names always win over keywords, e.g. `dub` -> Reggae even though `dubstep` -> Electronic.
+- A song joins every group one of its genres maps to (`pop rock` and `hard rock` artists can land in both Pop and Rock).
+- Unmatched genres go to **Other**; songs whose artist has no genre can go to **Unclassified**; groups below **Min songs** are skipped.
+- **Merge selected** adds a top-priority rule claiming all genres of the ticked groups.
+
+Rules are stored as JSON and can be edited in the app or by hand:
+
+| OS | Location |
+|----|----------|
+| Linux | `~/.config/SpotifyPlaylistService/genre-rules.json` |
+| Windows | `%APPDATA%\SpotifyPlaylistService\genre-rules.json` |
+
+The same folder holds `artist-genres.json` (30-day cache that makes re-scans fast) and `session.json` (Client ID and refresh token, readable only by your user on Linux). Delete `session.json` or use **Sign out** to forget the login.
+
+### Bulk delete safety
+
+- Only playlists **owned by you** whose names start with **`[Genre]`** are listed or deletable; the library re-checks this on every delete, so other playlists are skipped even if passed in.
+- Deleting more than 10 playlists requires typing `DELETE`.
+- Spotify has no hard delete: playlists are removed from your library and can be restored at [spotify.com/account/recover-playlists](https://www.spotify.com/account/recover-playlists/).
+
+## Library usage
 
 ```csharp
-using SpotifyPlaylistService;
+using SpotifyPlaylistService.Models;
 using SpotifyPlaylistService.Services;
+using SpotifyPlaylistService.Storage;
 
-// Initialize services
-var authService = new SpotifyAuthService();
-var apiService = new SpotifyApiService();
-var playlistService = new SpotifyManagerService(apiService);
+var auth = new SpotifyAuthService(new JsonSessionStore());
+var manager = new SpotifyManagerService(new SpotifyApiService(), new JsonArtistGenreCache());
 
-// Authenticate
-await authService.AuthenticateAsync("YOUR_CLIENT_ID", "YOUR_CLIENT_SECRET");
+if (!await auth.TryRestoreSessionAsync())
+    await auth.AuthenticateWithPkceAsync("YOUR_CLIENT_ID");
 
-// Initialize service with access token
-await playlistService.InitializeAsync(authService.AccessToken);
+await manager.InitializeAsync(auth); // also wires automatic token refresh
 
-// Get liked songs with genres
-var tracks = await playlistService.GetLikedSongsWithGenresAsync();
-Console.WriteLine($"Found {tracks.Count} liked songs");
+var progress = new Progress<OperationProgress>(p => Console.WriteLine(p.Message));
+var tracks = await manager.GetLikedSongsWithGenresAsync(progress);
 
-// Create genre playlists
-var results = await playlistService.CreateAllGenrePlaylistsAsync(tracks);
-Console.WriteLine($"Created {results.Count} genre playlists");
+// Collate into parent genres and create one playlist per group
+var groups = manager.CollateGenres(tracks, new GenreRuleStore().Load());
+await manager.CreateCollatedPlaylistsAsync(groups, progress);
+
+// Bulk delete everything this library created
+var result = await manager.DeleteGenrePlaylistsAsync(await manager.GetGenrePlaylistsAsync(), progress);
+Console.WriteLine($"Deleted {result.Deleted.Count}, failed {result.Failed.Count}");
 ```
 
-## Configuration
+The console app (`dotnet run --project src/SpotifyPlaylistService.Console`) offers the same operations as a text menu.
 
-### Option 1: Pass Values Directly
-```csharp
-var authService = new SpotifyAuthService();
-await authService.AuthenticateAsync(clientId, clientSecret);
-```
+### Main types
 
-### Option 2: Environment Variables
-```bash
-# Set environment variables
-export SPOTIFY_CLIENT_ID="your_client_id"
-export SPOTIFY_CLIENT_SECRET="your_client_secret"
-```
-
-```csharp
-var clientId = Environment.GetEnvironmentVariable("SPOTIFY_CLIENT_ID");
-var clientSecret = Environment.GetEnvironmentVariable("SPOTIFY_CLIENT_SECRET");
-
-var authService = new SpotifyAuthService();
-await authService.AuthenticateAsync(clientId, clientSecret);
-```
-
-### Option 3: Configuration File (appsettings.json)
-```json
-{
-  "Spotify": {
-    "ClientId": "your_client_id",
-    "ClientSecret": "your_client_secret"
-  }
-}
-```
-
-```csharp
-var configuration = new ConfigurationBuilder()
-    .AddJsonFile("appsettings.json")
-    .Build();
-
-var clientId = configuration["Spotify:ClientId"];
-var clientSecret = configuration["Spotify:ClientSecret"];
-```
-
-## API Reference
-
-### SpotifyAuthService
-Handles OAuth 2.0 authentication flow.
-
-```csharp
-public interface ISpotifyAuthService
-{
-    string? AccessToken { get; }
-    string? RefreshToken { get; }
-    Task<bool> AuthenticateAsync(string clientId, string clientSecret);
-    Task<bool> RefreshAccessTokenAsync();
-}
-```
-
-### SpotifyApiService
-Low-level Spotify API operations.
-
-```csharp
-public interface ISpotifyApiService
-{
-    Task<List<SpotifyTrack>> GetLikedSongsAsync();
-    Task<List<SpotifyPlaylist>> GetUserPlaylistsAsync();
-    Task<string> CreatePlaylistAsync(string name, string description);
-    Task<bool> DeletePlaylistAsync(string playlistId);
-    // ... and more
-}
-```
-
-### SpotifyManagerService
-High-level business logic and orchestration.
-
-```csharp
-public interface ISpotifyManagerService
-{
-    Task<List<SpotifyTrack>> GetLikedSongsWithGenresAsync();
-    Task<Dictionary<string, string>> CreateAllGenrePlaylistsAsync(List<SpotifyTrack> tracks);
-    Task<int> DeleteAllGenrePlaylistsAsync();
-    Task<bool> AddPlaylistTracksToLikedAsync(string playlistId);
-    // ... and more
-}
-```
-
-## Examples
-
-### Example 1: Create Genre Playlists
-```csharp
-var tracks = await playlistService.GetLikedSongsWithGenresAsync();
-var genreStats = playlistService.GetGenreStatistics(tracks);
-
-foreach (var genre in genreStats.Keys)
-{
-    await playlistService.CreateOrUpdateGenrePlaylistAsync(genre, tracks);
-    Console.WriteLine($"Created playlist for: {genre}");
-}
-```
-
-### Example 2: Add Playlist Songs to Liked
-```csharp
-var playlists = await playlistService.GetUserPlaylistsAsync();
-var playlistIds = playlists.Select(p => p.Id).ToList();
-
-await playlistService.AddMultiplePlaylistsToLikedAsync(playlistIds);
-Console.WriteLine("All playlist tracks added to liked songs");
-```
-
-### Example 3: Clean Up Genre Playlists
-```csharp
-var genrePlaylists = await playlistService.GetGenrePlaylistsAsync();
-Console.WriteLine($"Found {genrePlaylists.Count} genre playlists");
-
-var deletedCount = await playlistService.DeleteAllGenrePlaylistsAsync();
-Console.WriteLine($"Deleted {deletedCount} playlists");
-```
+| Type | Role |
+|------|------|
+| `SpotifyAuthService` | PKCE (or legacy client-secret) OAuth via a loopback listener; session persistence and token refresh |
+| `SpotifyApiService` | Low-level Web API calls; uses `SpotifyHttpHandler` for 429/5xx retry and 401 refresh |
+| `SpotifyManagerService` | Orchestration: liked songs with genres, collated playlist sync, safe bulk delete |
+| `GenreCollator` / `GenreRuleSet` | Pure, unit-tested genre-to-group mapping |
+| `GenreRuleStore`, `JsonArtistGenreCache`, `JsonSessionStore` | Per-user JSON storage |
 
 ## Project Structure
 
 ```
 SpotifyPlaylistService/
 ├── src/
-│   ├── SpotifyPlaylistService/
-│   │   ├── Models/
-│   │   │   ├── SpotifyTrack.cs
-│   │   │   ├── SpotifyPlaylist.cs
-│   │   │   └── SpotifyFolder.cs
-│   │   ├── Services/
-│   │   │   ├── ISpotifyAuthService.cs
-│   │   │   ├── SpotifyAuthService.cs
-│   │   │   ├── ISpotifyApiService.cs
-│   │   │   ├── SpotifyApiService.cs
-│   │   │   ├── ISpotifyManagerService.cs
-│   │   │   └── SpotifyManagerService.cs
-│   │   └── SpotifyPlaylistService.csproj
-│   └── SpotifyPlaylistService.Console/
-│       ├── Program.cs
-│       └── SpotifyPlaylistService.Console.csproj
+│   ├── SpotifyPlaylistService/            # Library (net8.0)
+│   │   ├── Http/                          # SpotifyHttpHandler, SpotifyApiException
+│   │   ├── Model/                         # Tracks, playlists, genre rules/groups, progress
+│   │   ├── Services/                      # Auth, API, manager, Collation/GenreCollator
+│   │   └── Storage/                       # Rule, artist-genre cache and session stores
+│   ├── SpotifyPlaylistService.Console/    # Text-menu app
+│   └── SpotifyPlaylistService.Desktop/    # Avalonia desktop app (MVVM)
+│       ├── ViewModels/                    # Testable, no window code
+│       ├── Views/                         # XAML
+│       └── Services/                      # Dialog abstraction
 ├── tests/
-│   └── SpotifyPlaylistService.Tests/
-├── .gitignore
-├── README.md
-├── LICENSE
+│   └── SpotifyPlaylistService.Tests/      # xUnit + Avalonia headless UI tests
 └── SpotifyPlaylistService.sln
+```
+
+## Development
+
+```bash
+dotnet build
+dotnet test                                    # unit, view model and headless UI tests
+SCREENSHOT_DIR=/tmp/shots dotnet test          # also saves a PNG of each page
 ```
 
 ## Requirements
 
-- .NET 6.0 or higher
-- Spotify Developer Account
+- .NET 8.0 SDK
+- Spotify Developer app (owner needs Premium for development mode)
 - Required Scopes:
   - `user-library-read`
   - `user-library-modify`
@@ -218,9 +162,9 @@ SpotifyPlaylistService/
 
 ## Limitations
 
+- **Spotify API changes (February 2026)**: the library targets the updated development-mode endpoints (`/me/playlists`, `/playlists/{id}/items`, `/me/library`). The batch artists endpoint was removed, so the first genre scan makes one request per artist; later scans use the cache.
 - **Playlist Folders**: Spotify's public API does not support folder operations. Genre playlists use the `[Genre]` naming convention for manual organization.
-- **Rate Limiting**: The library includes basic rate limiting (100ms delays) but heavy usage may hit Spotify's rate limits.
-- **Genre Detection**: Genres are retrieved from artist data, so tracks may inherit multiple or no genres.
+- **Genre Detection**: Genres come from the track's first artist, and many artists have no genres at all (see the Library page's "songs without genre" count).
 
 ## Contributing
 

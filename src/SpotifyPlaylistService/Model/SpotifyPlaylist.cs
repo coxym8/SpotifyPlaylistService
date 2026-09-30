@@ -21,6 +21,11 @@
         public required string OwnerId { get; set; }
 
         /// <summary>
+        /// Playlist description (may be null)
+        /// </summary>
+        public string? Description { get; set; }
+
+        /// <summary>
         /// Total number of tracks in the playlist
         /// </summary>
         public int TotalTracks { get; set; }
